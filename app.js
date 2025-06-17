@@ -27,6 +27,10 @@ app.get('/', (req, res) => {
     res.json({ message: 'Welcome to the API' });
 });
 
+// Movie routes
+const movieRoutes = require('./routes/movieRoutes');
+app.use('/api/movies', movieRoutes);
+
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);
