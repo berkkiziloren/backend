@@ -2,25 +2,15 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const process = require('process');
-const {authenticate} = require('@google-cloud/local-auth');
 const {google} = require('googleapis');
 
 const app = express();
 const port = 8080;
 
-// If modifying these scopes, delete token.json.
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
-// The file token.json stores the user's access and refresh tokens, and is
-// created automatically when the authorization flow completes for the first
-// time.
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
 
-/**
- * Reads previously authorized credentials from the save file.
- *
- * @return {Promise<OAuth2Client|null>}
- */
 async function loadSavedCredentialsIfExist() {
   try {
     const content = await fs.readFile(TOKEN_PATH);
@@ -31,12 +21,6 @@ async function loadSavedCredentialsIfExist() {
   }
 }
 
-/**
- * Serializes credentials to a file compatible with GoogleAuth.fromJSON.
- *
- * @param {OAuth2Client} client
- * @return {Promise<void>}
- */
 async function saveCredentials(client) {
   const content = await fs.readFile(CREDENTIALS_PATH);
   const keys = JSON.parse(content);
@@ -48,25 +32,6 @@ async function saveCredentials(client) {
     refresh_token: client.credentials.refresh_token,
   });
   await fs.writeFile(TOKEN_PATH, payload);
-}
-
-/**
- * Load or request or authorization to call APIs.
- *
- */
-async function authorize() {
-  let client = await loadSavedCredentialsIfExist();
-  if (client) {
-    return client;
-  }
-  client = await authenticate({
-    scopes: SCOPES,
-    keyfilePath: CREDENTIALS_PATH,
-  });
-  if (client.credentials) {
-    await saveCredentials(client);
-  }
-  return client;
 }
 
 async function listMessages(auth, maxResults = 10) {
@@ -134,18 +99,81 @@ async function listMessages(auth, maxResults = 10) {
   
       return messageDetails.filter(msg => msg !== null);
     } catch (error) {
-      console.error('Error in listMessages:', error);
-      throw error;
+        if (error.response && error.response.status === 401) {
+            await fs.unlink(TOKEN_PATH).catch(err => console.error('Error deleting token file:', err));
+        }
+        console.error('Error in listMessages:', error);
+        throw error;
     }
 }
 
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/start-auth', async (req, res) => {
+    try {
+        const content = await fs.readFile(CREDENTIALS_PATH);
+        const keys = JSON.parse(content);
+        const key = keys.installed || keys.web;
+        const oAuth2Client = new google.auth.OAuth2(
+            key.client_id,
+            key.client_secret,
+            `http://localhost:${port}/oauth2callback`
+        );
+
+        const authorizeUrl = oAuth2Client.generateAuthUrl({
+            access_type: 'offline',
+            scope: SCOPES,
+        });
+        res.redirect(authorizeUrl);
+    } catch (e) {
+        console.error('Failed to start auth:', e);
+        res.status(500).send('Failed to start authentication.');
+    }
+});
+
+app.get('/oauth2callback', async (req, res) => {
+    try {
+        const code = req.query.code;
+        const content = await fs.readFile(CREDENTIALS_PATH);
+        const keys = JSON.parse(content);
+        const key = keys.installed || keys.web;
+        const oAuth2Client = new google.auth.OAuth2(
+            key.client_id,
+            key.client_secret,
+            `http://localhost:${port}/oauth2callback`
+        );
+
+        const { tokens } = await oAuth2Client.getToken(code);
+        oAuth2Client.setCredentials(tokens);
+
+        const payload = JSON.stringify({
+            type: 'authorized_user',
+            client_id: key.client_id,
+            client_secret: key.client_secret,
+            refresh_token: tokens.refresh_token,
+            ...tokens,
+        });
+        await fs.writeFile(TOKEN_PATH, payload);
+        
+        res.send('<script>window.close();</script>');
+    } catch (e) {
+        console.error('Failed to get token:', e);
+        res.status(500).send('Failed to get token.');
+    }
+});
+
 app.get('/emails', async (req, res) => {
     try {
-        const auth = await authorize();
+        const auth = await loadSavedCredentialsIfExist();
+        if (!auth) {
+            return res.status(401).send('You are not authenticated.');
+        }
+
         const messages = await listMessages(auth, 15);
         
-        let html = '<h1>Your Emails</h1>';
-        html += '<style>body { font-family: sans-serif; } .email { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; } .from, .subject { font-weight: bold; } .body { margin-top: 10px; white-space: pre-wrap; } </style>';
+        let html = '';
         
         messages.forEach(msg => {
             html += '<div class="email">';
@@ -165,5 +193,4 @@ app.get('/emails', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
-  console.log(`Access your emails at http://localhost:${port}/emails`);
 }); 
