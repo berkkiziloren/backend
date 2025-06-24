@@ -11,27 +11,127 @@
 </head>
 <body>
     <h1>My Emails</h1>
+    <div id="auth-forms">
+        <div id="register-form">
+            <h2>Register</h2>
+            <input type="email" id="register-email" placeholder="Email"><br>
+            <input type="password" id="register-password" placeholder="Password"><br>
+            <button onclick="register()">Register</button>
+            <div id="register-status"></div>
+        </div>
+        <div id="login-form">
+            <h2>Login</h2>
+            <input type="email" id="login-email" placeholder="Email"><br>
+            <input type="password" id="login-password" placeholder="Password"><br>
+            <button onclick="login()">Login</button>
+            <div id="login-status"></div>
+        </div>
+        <button id="logout-btn" style="display:none" onclick="logout()">Logout</button>
+    </div>
     <div id="status">Loading...</div>
     <div id="emails-container"></div>
+    <div id="gmail-auth-link" style="display:none"></div>
 
     <script>
         const statusDiv = document.getElementById('status');
         const emailsContainer = document.getElementById('emails-container');
-        let authWindow = null;
+        const gmailAuthLink = document.getElementById('gmail-auth-link');
+        const registerStatus = document.getElementById('register-status');
+        const loginStatus = document.getElementById('login-status');
+        const logoutBtn = document.getElementById('logout-btn');
+        const authForms = document.getElementById('auth-forms');
         let pollInterval;
 
+        function getToken() {
+            return localStorage.getItem('jwt_token');
+        }
+        function setToken(token) {
+            localStorage.setItem('jwt_token', token);
+        }
+        function clearToken() {
+            localStorage.removeItem('jwt_token');
+        }
+        function isAuthenticated() {
+            return !!getToken();
+        }
+
+        async function register() {
+            registerStatus.textContent = '';
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const res = await fetch('/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                registerStatus.textContent = 'Registered! You can now log in.';
+            } else {
+                registerStatus.textContent = data.error || 'Registration failed.';
+            }
+        }
+
+        async function login() {
+            loginStatus.textContent = '';
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const res = await fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await res.json();
+            if (res.ok && data.token) {
+                setToken(data.token);
+                loginStatus.textContent = 'Logged in!';
+                showApp();
+                fetchEmails();
+            } else {
+                loginStatus.textContent = data.error || 'Login failed.';
+            }
+        }
+
+        function logout() {
+            clearToken();
+            showAuthForms();
+        }
+
+        function showApp() {
+            authForms.style.display = 'none';
+            logoutBtn.style.display = 'inline-block';
+            gmailAuthLink.style.display = 'none';
+            emailsContainer.innerHTML = '';
+        }
+        function showAuthForms() {
+            authForms.style.display = 'block';
+            logoutBtn.style.display = 'none';
+            statusDiv.textContent = '';
+            emailsContainer.innerHTML = '';
+            gmailAuthLink.style.display = 'none';
+        }
+
         async function fetchEmails() {
+            if (!isAuthenticated()) {
+                showAuthForms();
+                return;
+            }
             statusDiv.textContent = 'Checking authentication status...';
             try {
-                const response = await fetch('/emails');
+                const response = await fetch('/emails', {
+                    headers: { 'Authorization': 'Bearer ' + getToken() }
+                });
                 if (response.ok) {
                     if(pollInterval) clearInterval(pollInterval);
-                    if (authWindow) authWindow.close();
                     statusDiv.textContent = '';
                     const emailsHtml = await response.text();
                     emailsContainer.innerHTML = emailsHtml;
+                    gmailAuthLink.style.display = 'none';
                 } else if (response.status === 401) {
-                    statusDiv.innerHTML = 'Authentication required. <a href="/start-auth" target="_blank">Click here to authenticate</a>.';
+                    statusDiv.textContent = '';
+                    emailsContainer.innerHTML = '';
+                    gmailAuthLink.innerHTML = 'Authentication required. <a href="#" onclick="startGmailAuth()">Click here to authenticate</a>.';
+                    gmailAuthLink.style.display = 'block';
                     if (!pollInterval) {
                         pollInterval = setInterval(fetchEmails, 2000);
                     }
@@ -46,7 +146,38 @@
             }
         }
 
-        fetchEmails();
+        async function startGmailAuth() {
+            // Open /start-auth with Authorization header via popup
+            const token = getToken();
+            if (!token) return;
+            // Create a temporary endpoint to get the auth URL with JWT
+            const win = window.open('', '_blank', 'width=500,height=700');
+            fetch('/start-auth', {
+                headers: { 'Authorization': 'Bearer ' + token },
+                redirect: 'manual'
+            }).then(async res => {
+                if (res.redirected) {
+                    win.location = res.url;
+                } else if (res.status === 200) {
+                    const url = await res.text();
+                    win.location = url;
+                } else {
+                    win.close();
+                    alert('Failed to start Gmail authentication.');
+                }
+            }).catch(() => {
+                win.close();
+                alert('Failed to start Gmail authentication.');
+            });
+        }
+
+        // On load
+        if (isAuthenticated()) {
+            showApp();
+            fetchEmails();
+        } else {
+            showAuthForms();
+        }
     </script>
 </body>
 </html> 
