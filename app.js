@@ -33,6 +33,7 @@ mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
+  refreshToken: String,
   // add other fields as needed
 });
 const User = mongoose.model('User', userSchema);
@@ -162,6 +163,7 @@ async function listMessages(auth, maxResults = 10) {
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'your_super_secret_refresh_token_secret';
 
 // Registration endpoint
 app.post('/register', async (req, res) => {
@@ -183,8 +185,33 @@ app.post('/login', async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-  const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '1d' });
-  res.json({ token });
+
+  const accessToken = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '15m' });
+  const refreshToken = jwt.sign({ userId: user._id }, REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
+  user.refreshToken = refreshToken;
+  await user.save();
+
+  res.json({ accessToken, refreshToken });
+});
+
+app.post('/refresh-token', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(401).json({ error: 'Refresh token is required' });
+
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
+    const user = await User.findById(payload.userId);
+
+    if (!user || user.refreshToken !== refreshToken) {
+      return res.status(403).json({ error: 'Invalid refresh token' });
+    }
+
+    const accessToken = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: '15m' });
+    res.json({ accessToken });
+
+  } catch (error) {
+    return res.status(403).json({ error: 'Invalid or expired refresh token' });
+  }
 });
 
 // Auth middleware
