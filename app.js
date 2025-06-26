@@ -212,7 +212,7 @@ app.get('/start-auth', requireAuth, async (req, res) => {
     const redirectUri =
       process.env.ENVIRONMENT === 'local'
         ? `http://localhost:${port}/oauth2callback`
-        : 'https://suka-ai.xyz/oauth2callback';
+        : 'https://www.suka-ai.xyz/oauth2callback';
     const oAuth2Client = new google.auth.OAuth2(
       key.client_id,
       key.client_secret,
@@ -243,7 +243,7 @@ app.get('/oauth2callback', async (req, res) => {
     const redirectUri =
       process.env.ENVIRONMENT === 'local'
         ? `http://localhost:${port}/oauth2callback`
-        : 'https://suka-ai.xyz/oauth2callback';
+        : 'https://www.suka-ai.xyz/oauth2callback';
     const oAuth2Client = new google.auth.OAuth2(
       key.client_id,
       key.client_secret,
