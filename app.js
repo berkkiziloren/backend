@@ -209,10 +209,14 @@ app.get('/start-auth', requireAuth, async (req, res) => {
     const content = await fs.readFile(CREDENTIALS_PATH);
     const keys = JSON.parse(content);
     const key = keys.installed || keys.web;
+    const redirectUri =
+      process.env.ENVIRONMENT === 'local'
+        ? `http://localhost:${port}/oauth2callback`
+        : 'https://suka-ai.xyz/oauth2callback';
     const oAuth2Client = new google.auth.OAuth2(
       key.client_id,
       key.client_secret,
-      `http://${process.env.ENVIRONMENT === 'local' ? 'localhost' : 'http://backend-env.eba-xbmpiwm3.us-east-1.elasticbeanstalk.com/'}:${port}/oauth2callback`
+      redirectUri
     );
 
     const authorizeUrl = oAuth2Client.generateAuthUrl({
@@ -236,10 +240,14 @@ app.get('/oauth2callback', async (req, res) => {
     const content = await fs.readFile(CREDENTIALS_PATH);
     const keys = JSON.parse(content);
     const key = keys.installed || keys.web;
+    const redirectUri =
+      process.env.ENVIRONMENT === 'local'
+        ? `http://localhost:${port}/oauth2callback`
+        : 'https://suka-ai.xyz/oauth2callback';
     const oAuth2Client = new google.auth.OAuth2(
       key.client_id,
       key.client_secret,
-      `http://localhost:${port}/oauth2callback`
+      redirectUri
     );
 
     const { tokens } = await oAuth2Client.getToken(code);
