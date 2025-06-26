@@ -217,13 +217,17 @@ app.post('/refresh-token', async (req, res) => {
 // Auth middleware
 function requireAuth(req, res, next) {
   const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'No token' });
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'No token provided' });
   try {
-    const payload = jwt.verify(auth.replace('Bearer ', ''), JWT_SECRET);
+    const token = auth.replace('Bearer ', '');
+    const payload = jwt.verify(token, JWT_SECRET);
     req.user = payload;
     next();
-  } catch {
-    res.status(401).json({ error: 'Invalid token' });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+    return res.status(401).json({ error: 'Invalid token' });
   }
 }
 

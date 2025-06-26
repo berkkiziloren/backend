@@ -42,17 +42,24 @@
         const authForms = document.getElementById('auth-forms');
         let pollInterval;
 
-        function getToken() {
-            return localStorage.getItem('jwt_token');
+        function getAccessToken() {
+            return localStorage.getItem('accessToken');
         }
-        function setToken(token) {
-            localStorage.setItem('jwt_token', token);
+        function getRefreshToken() {
+            return localStorage.getItem('refreshToken');
         }
-        function clearToken() {
-            localStorage.removeItem('jwt_token');
+        function setTokens(accessToken, refreshToken) {
+            localStorage.setItem('accessToken', accessToken);
+            if (refreshToken) {
+                localStorage.setItem('refreshToken', refreshToken);
+            }
+        }
+        function clearTokens() {
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
         }
         function isAuthenticated() {
-            return !!getToken();
+            return !!getAccessToken();
         }
 
         async function register() {
@@ -82,8 +89,8 @@
                 body: JSON.stringify({ email, password })
             });
             const data = await res.json();
-            if (res.ok && data.token) {
-                setToken(data.token);
+            if (res.ok && data.accessToken) {
+                setTokens(data.accessToken, data.refreshToken);
                 loginStatus.textContent = 'Logged in!';
                 showApp();
                 fetchEmails();
@@ -93,7 +100,7 @@
         }
 
         function logout() {
-            clearToken();
+            clearTokens();
             showAuthForms();
         }
 
@@ -111,6 +118,47 @@
             gmailAuthLink.style.display = 'none';
         }
 
+        async function fetchWithAuth(url, options = {}) {
+            let accessToken = getAccessToken();
+            options.headers = {
+                ...options.headers,
+                'Authorization': 'Bearer ' + accessToken
+            };
+
+            let response = await fetch(url, options);
+
+            if (response.status === 401) {
+                const data = await response.json();
+                if (data.error === 'Token expired') {
+                    console.log('Access token expired. Refreshing...');
+                    const refreshToken = getRefreshToken();
+                    if (!refreshToken) {
+                        logout();
+                        throw new Error('No refresh token available.');
+                    }
+
+                    const refreshResponse = await fetch('/refresh-token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ refreshToken })
+                    });
+
+                    if (refreshResponse.ok) {
+                        const { accessToken: newAccessToken } = await refreshResponse.json();
+                        setTokens(newAccessToken);
+                        console.log('Token refreshed. Retrying original request...');
+                        options.headers['Authorization'] = 'Bearer ' + newAccessToken;
+                        response = await fetch(url, options); // Retry the request
+                    } else {
+                        console.error('Failed to refresh token.');
+                        logout(); // Logout if refresh fails
+                        throw new Error('Failed to refresh token.');
+                    }
+                }
+            }
+            return response;
+        }
+
         async function fetchEmails() {
             if (!isAuthenticated()) {
                 showAuthForms();
@@ -118,9 +166,8 @@
             }
             statusDiv.textContent = 'Checking authentication status...';
             try {
-                const response = await fetch('/emails', {
-                    headers: { 'Authorization': 'Bearer ' + getToken() }
-                });
+                const response = await fetchWithAuth('/emails');
+
                 if (response.ok) {
                     if(pollInterval) clearInterval(pollInterval);
                     statusDiv.textContent = '';
@@ -137,26 +184,28 @@
                     }
                 } else {
                     if(pollInterval) clearInterval(pollInterval);
-                    statusDiv.textContent = `Error: ${await response.text()}`;
+                    const errorText = await response.text();
+                    statusDiv.textContent = `Error: ${errorText}`;
                 }
             } catch (error) {
                 console.error('Error fetching emails:', error);
-                statusDiv.textContent = 'Failed to connect to server.';
+                if (error.message.includes('refresh token')) {
+                    statusDiv.textContent = 'Your session has expired. Please log in again.';
+                } else {
+                    statusDiv.textContent = 'Failed to connect to server.';
+                }
                 if(pollInterval) clearInterval(pollInterval);
             }
         }
 
         async function startGmailAuth() {
             // Open /start-auth with Authorization header via popup
-            const token = getToken();
-            if (!token) return;
+            if (!getAccessToken()) return;
             // Create a temporary endpoint to get the auth URL with JWT
             const win = window.open('', '_blank', 'width=500,height=700');
-            fetch('/start-auth', {
-                headers: { 'Authorization': 'Bearer ' + token },
-                redirect: 'manual'
-            }).then(async res => {
-                if (res.redirected) {
+            try {
+                const res = await fetchWithAuth('/start-auth', { redirect: 'manual' });
+                 if (res.redirected) {
                     win.location = res.url;
                 } else if (res.status === 200) {
                     const url = await res.text();
@@ -165,10 +214,11 @@
                     win.close();
                     alert('Failed to start Gmail authentication.');
                 }
-            }).catch(() => {
-                win.close();
+            } catch (error) {
+                 win.close();
+                console.error('Error starting gmail auth', error);
                 alert('Failed to start Gmail authentication.');
-            });
+            }
         }
 
         // On load
