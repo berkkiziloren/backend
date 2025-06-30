@@ -25,6 +25,14 @@
             <input type="password" id="login-password" placeholder="Password"><br>
             <button onclick="login()">Login</button>
             <div id="login-status"></div>
+            <p><a href="#" onclick="showForgotPassword()">Forgot Password?</a></p>
+        </div>
+        <div id="forgot-password-form" style="display:none">
+            <h2>Forgot Password</h2>
+            <input type="email" id="forgot-email" placeholder="Email"><br>
+            <button onclick="forgotPassword()">Send Reset Email</button>
+            <button onclick="showLoginForm()">Back to Login</button>
+            <div id="forgot-status"></div>
         </div>
         <button id="logout-btn" style="display:none" onclick="logout()">Logout</button>
     </div>
@@ -116,6 +124,44 @@
             statusDiv.textContent = '';
             emailsContainer.innerHTML = '';
             gmailAuthLink.style.display = 'none';
+        }
+
+        function showForgotPassword() {
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('forgot-password-form').style.display = 'block';
+        }
+
+        function showLoginForm() {
+            document.getElementById('login-form').style.display = 'block';
+            document.getElementById('forgot-password-form').style.display = 'none';
+            document.getElementById('forgot-status').textContent = '';
+        }
+
+        async function forgotPassword() {
+            const forgotStatus = document.getElementById('forgot-status');
+            const email = document.getElementById('forgot-email').value;
+            
+            if (!email) {
+                forgotStatus.textContent = 'Please enter your email address.';
+                return;
+            }
+            
+            try {
+                const res = await fetch('/forgot-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    forgotStatus.textContent = 'Password reset email sent! Check your inbox.';
+                } else {
+                    forgotStatus.textContent = data.error || 'Failed to send reset email.';
+                }
+            } catch (error) {
+                forgotStatus.textContent = 'Error sending reset email.';
+            }
         }
 
         async function fetchWithAuth(url, options = {}) {
